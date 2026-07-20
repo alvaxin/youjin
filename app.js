@@ -364,7 +364,10 @@ function dispatchAction(action, payload = {}, seat = state.selfSeat) {
   if (action === "reset") { if (isHost()) resetScores(); return; }
   if (seat !== state.current) return;
   if (action === "claim") claimForHuman(payload.type, payload.option);
-  if (action === "hu") tryHumanHu();
+  if (action === "hu") {
+    if (state.pendingClaim) claimForHuman("hu");
+    else tryHumanHu();
+  }
   if (action === "youjin") declareYoujin(state.current);
   if (action === "pass") passHumanClaim();
   if (action === "discard") discardTile(state.current, payload.tileIndex);
