@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+Thumbs.db
+Desktop.ini
+__pycache__/
+*.pyc

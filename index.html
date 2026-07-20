@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>游金麻将</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="gamebar">
+        <div class="brand">游金麻将 <span id="roundText">准备开局</span></div>
+        <select id="modeSelect" aria-label="牌型"><option value="no-winds">无字 120张</option><option value="with-winds">有字 144张</option></select>
+        <div id="accountText" class="account">正在生成雀友账号...</div>
+        <div class="room-controls">
+          <button id="createRoomBtn" title="创建线上房间">创建房间</button>
+          <input id="roomCodeInput" maxlength="6" placeholder="输入房间码" aria-label="房间码" />
+          <button id="joinRoomBtn">加入</button>
+          <strong id="roomText">本地练习</strong>
+        </div>
+        <button id="newRoundBtn" class="primary">开始新局</button>
+      </header>
+
+      <section id="roomLobby" class="room-lobby" hidden>
+        <strong id="roomCodeText"></strong>
+        <div id="roomMembers" class="room-members"></div>
+      </section>
+
+      <section class="mahjong-table" aria-label="麻将桌">
+        <aside class="opponent top-seat" data-seat="2"></aside>
+        <aside class="opponent left-seat" data-seat="3"></aside>
+        <aside class="opponent right-seat" data-seat="1"></aside>
+
+        <div class="top-wall tile-wall"></div>
+        <div class="left-wall tile-wall"></div>
+        <div class="right-wall tile-wall"></div>
+        <div class="bottom-wall tile-wall"></div>
+
+        <section class="table-center">
+          <div class="center-top"><span id="goldTile">金牌 -</span><span id="whiteTile">白板 -</span></div>
+          <div class="round-dial"><span id="diceText">-</span><strong id="turnText">等待开局</strong><small id="wallCount">0 张</small></div>
+          <div id="resultText" class="result-text">未结束</div>
+          <div id="turnPointer" class="turn-pointer" hidden aria-label="当前回合方向"></div>
+        </section>
+
+        <section class="self-seat">
+          <div id="selfInfo" class="self-info opponent-card self-card">
+            <span id="selfAvatar" class="avatar">南</span>
+            <span><strong id="selfName">我</strong><small id="selfMeta">1000 分 · 0 张</small></span>
+          </div>
+          <div id="selfDiscards" class="seat-discards self-discards"></div>
+          <div id="selfMelds" class="self-melds"></div>
+          <div id="selfHand" class="self-hand"></div>
+        </section>
+      </section>
+
+      <section class="actionbar">
+        <button id="chiBtn">吃</button><button id="pengBtn">碰</button><button id="gangBtn">杠</button><button id="huBtn">胡</button><button id="youjinBtn">游金</button><button id="passBtn">过</button>
+        <div id="chiOptions" class="chi-options" hidden></div>
+      </section>
+
+      <section class="bottom-panels">
+        <details class="panel"><summary>牌局记录</summary><ol id="logList"></ol></details>
+        <details class="panel"><summary>积分数据</summary><div id="scoreDetails" class="score-details"></div><button id="resetScoresBtn" class="score-reset">积分清零</button></details>
+      </section>
+    </main>
+
+    <section id="settlementPanel" class="settlement" hidden><div class="settlement-card"><div class="settlement-head"><h2>本局结算</h2><button id="closeSettlementBtn">关闭</button></div><div id="settlementDetails"></div></div></section>
+    <script src="app.js"></script>
+  </body>
+</html>
