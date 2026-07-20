@@ -67,5 +67,10 @@
 
     <section id="settlementPanel" class="settlement" hidden><div class="settlement-card"><div class="settlement-head"><h2>本局结算</h2><button id="closeSettlementBtn">关闭</button></div><div id="settlementDetails"></div></div></section>
     <script src="app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+      }
+    </script>
   </body>
 </html>
