@@ -107,7 +107,7 @@ const el = {
   closeSettlementBtn: document.querySelector("#closeSettlementBtn")
 };
 
-const net = { account: null, room: null, events: null, syncing: false };
+const net = { account: null, room: null, events: null, syncing: false, statePoll: null, actionPoll: null, statePolling: false, actionPolling: false, handledActions: new Set() };
 el.newRoundBtn.addEventListener("click", () => requestAction("start"));
 el.resetScoresBtn.addEventListener("click", () => requestAction("reset"));
 el.chiBtn.addEventListener("click", () => requestAction("claim", { type: "chi" }));
@@ -165,8 +165,7 @@ function shuffle(items) {
   return copy;
 }
 
-async function api(path, body) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function readApiResponse(response) {
   const raw = await response.text();
   let data;
   try {
@@ -176,6 +175,14 @@ async function api(path, body) {
   }
   if (!response.ok) throw new Error(data.error || "网络请求失败");
   return data;
+}
+
+async function api(path, body) {
+  return readApiResponse(await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+}
+
+async function getApi(path) {
+  return readApiResponse(await fetch(path));
 }
 
 async function initAccount() {
@@ -211,22 +218,71 @@ async function joinRoom() {
 
 function connectRoom() {
   net.events?.close();
+  clearInterval(net.statePoll);
+  clearInterval(net.actionPoll);
+  net.handledActions.clear();
   net.events = new EventSource(`/api/rooms/${net.room.code}/events?token=${encodeURIComponent(net.account.token)}`);
   net.events.addEventListener("room", (event) => { net.room = { ...net.room, ...JSON.parse(event.data) }; updateRoomText(); });
   net.events.addEventListener("members", (event) => { const update = JSON.parse(event.data); net.room = { ...net.room, members: update.members }; updateRoomText(); });
   net.events.addEventListener("state", (event) => {
     if (isHost() && net.syncing) return;
-    const snapshot = JSON.parse(event.data);
-    Object.assign(state, snapshot, { selfSeat: net.room.mySeat ?? 0 });
-    render();
+    applyRemoteState(JSON.parse(event.data));
   });
   net.events.addEventListener("action", (event) => {
     if (!isHost()) return;
-    const request = JSON.parse(event.data);
-    if (request.from === net.account.token) return;
-    if (!Number.isInteger(request.seat) || !net.room.members.some((item) => item.seat === request.seat)) return;
-    dispatchAction(request.action, request.payload, request.seat);
+    handleRemoteAction(JSON.parse(event.data));
   });
+  startRoomFallbacks();
+}
+
+function applyRemoteState(snapshot) {
+  if (!snapshot) return;
+  Object.assign(state, snapshot, { selfSeat: net.room.mySeat ?? 0 });
+  render();
+}
+
+function handleRemoteAction(request) {
+  if (request.from === net.account.token) return;
+  if (!Number.isInteger(request.seat) || !net.room.members.some((item) => item.seat === request.seat)) return;
+  if (Number.isInteger(request.id)) {
+    if (net.handledActions.has(request.id)) return;
+    net.handledActions.add(request.id);
+    if (net.handledActions.size > 200) net.handledActions.clear();
+  }
+  dispatchAction(request.action, request.payload, request.seat);
+}
+
+function startRoomFallbacks() {
+  net.statePoll = window.setInterval(async () => {
+    if (net.statePolling || !net.room) return;
+    net.statePolling = true;
+    try {
+      const update = await getApi(`/api/rooms/${net.room.code}/state?token=${encodeURIComponent(net.account.token)}`);
+      if (update.room) {
+        net.room = { ...net.room, ...update.room };
+        updateRoomText();
+      }
+      if (update.state && (!isHost() || !net.syncing)) applyRemoteState(update.state);
+    } catch (error) {
+      console.warn("房间状态同步失败", error);
+    } finally {
+      net.statePolling = false;
+    }
+  }, 700);
+
+  if (!isHost()) return;
+  net.actionPoll = window.setInterval(async () => {
+    if (net.actionPolling || !net.room) return;
+    net.actionPolling = true;
+    try {
+      const result = await api(`/api/rooms/${net.room.code}/actions`, { token: net.account.token });
+      result.actions.forEach(handleRemoteAction);
+    } catch (error) {
+      console.warn("房间操作同步失败", error);
+    } finally {
+      net.actionPolling = false;
+    }
+  }, 450);
 }
 
 function isHost() { return !net.room || net.room.host === net.account?.token; }
