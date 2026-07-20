@@ -227,7 +227,7 @@ function connectRoom() {
   net.events.addEventListener("room", (event) => { net.room = { ...net.room, ...JSON.parse(event.data) }; updateRoomText(); });
   net.events.addEventListener("members", (event) => { const update = JSON.parse(event.data); net.room = { ...net.room, members: update.members }; updateRoomText(); });
   net.events.addEventListener("state", (event) => {
-    if (isRoomDriver() && net.syncing) return;
+    if (isRoomDriver()) return;
     applyRemoteState(JSON.parse(event.data));
   });
   net.events.addEventListener("action", (event) => {
@@ -264,7 +264,7 @@ function startRoomFallbacks() {
         net.room = { ...net.room, ...update.room };
         updateRoomText();
       }
-      if (update.state && (!isRoomDriver() || !net.syncing)) applyRemoteState(update.state);
+      if (update.state && !isRoomDriver()) applyRemoteState(update.state);
     } catch (error) {
       console.warn("房间状态同步失败", error);
     } finally {
@@ -292,13 +292,14 @@ function startRoomFallbacks() {
 async function refreshRoomDriver() {
   if (net.driverPolling || !net.room || !net.account) return;
   net.driverPolling = true;
+  const wasDriver = isRoomDriver();
   try {
     const update = await api(`/api/rooms/${net.room.code}/driver`, { token: net.account.token });
     if (update.room) {
       net.room = { ...net.room, ...update.room };
       updateRoomText();
     }
-    if (update.state) applyRemoteState(update.state);
+    if (update.state && !wasDriver && isRoomDriver()) applyRemoteState(update.state);
   } catch (error) {
     console.warn("房间执行权同步失败", error);
   } finally {
