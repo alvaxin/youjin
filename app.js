@@ -1303,11 +1303,14 @@ function settleScores(winner, type) {
   for (let i = 0; i < 4; i += 1) {
     if (i !== winner) state.scores[i] -= total;
   }
-  for (let i = 0; i < 4; i += 1) {
-    for (let j = i + 1; j < 4; j += 1) {
-      const diff = waters[i] - waters[j];
-      state.scores[i] += diff;
-      state.scores[j] -= diff;
+  const otherPlayers = [0, 1, 2, 3].filter((index) => index !== winner);
+  for (let i = 0; i < otherPlayers.length; i += 1) {
+    for (let j = i + 1; j < otherPlayers.length; j += 1) {
+      const first = otherPlayers[i];
+      const second = otherPlayers[j];
+      const diff = waters[first] - waters[second];
+      state.scores[first] += diff;
+      state.scores[second] -= diff;
     }
   }
   const changes = state.scores.map((score, index) => score - before[index]);
