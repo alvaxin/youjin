@@ -107,7 +107,7 @@ const el = {
   closeSettlementBtn: document.querySelector("#closeSettlementBtn")
 };
 
-const net = { account: null, room: null, events: null, syncing: false, statePoll: null, actionPoll: null, statePolling: false, actionPolling: false, handledActions: new Set() };
+const net = { account: null, room: null, events: null, syncing: false, statePoll: null, actionPoll: null, driverPoll: null, aiWatchdog: null, statePolling: false, actionPolling: false, driverPolling: false, handledActions: new Set() };
 el.newRoundBtn.addEventListener("click", () => requestAction("start"));
 el.resetScoresBtn.addEventListener("click", () => requestAction("reset"));
 el.chiBtn.addEventListener("click", () => requestAction("claim", { type: "chi" }));
@@ -220,16 +220,18 @@ function connectRoom() {
   net.events?.close();
   clearInterval(net.statePoll);
   clearInterval(net.actionPoll);
+  clearInterval(net.driverPoll);
+  clearInterval(net.aiWatchdog);
   net.handledActions.clear();
   net.events = new EventSource(`/api/rooms/${net.room.code}/events?token=${encodeURIComponent(net.account.token)}`);
   net.events.addEventListener("room", (event) => { net.room = { ...net.room, ...JSON.parse(event.data) }; updateRoomText(); });
   net.events.addEventListener("members", (event) => { const update = JSON.parse(event.data); net.room = { ...net.room, members: update.members }; updateRoomText(); });
   net.events.addEventListener("state", (event) => {
-    if (isHost() && net.syncing) return;
+    if (isRoomDriver() && net.syncing) return;
     applyRemoteState(JSON.parse(event.data));
   });
   net.events.addEventListener("action", (event) => {
-    if (!isHost()) return;
+    if (!isRoomDriver()) return;
     handleRemoteAction(JSON.parse(event.data));
   });
   startRoomFallbacks();
@@ -262,7 +264,7 @@ function startRoomFallbacks() {
         net.room = { ...net.room, ...update.room };
         updateRoomText();
       }
-      if (update.state && (!isHost() || !net.syncing)) applyRemoteState(update.state);
+      if (update.state && (!isRoomDriver() || !net.syncing)) applyRemoteState(update.state);
     } catch (error) {
       console.warn("房间状态同步失败", error);
     } finally {
@@ -270,9 +272,11 @@ function startRoomFallbacks() {
     }
   }, 700);
 
-  if (!isHost()) return;
+  refreshRoomDriver();
+  net.driverPoll = window.setInterval(refreshRoomDriver, 1000);
+  net.aiWatchdog = window.setInterval(ensureAiProgress, 800);
   net.actionPoll = window.setInterval(async () => {
-    if (net.actionPolling || !net.room) return;
+    if (net.actionPolling || !net.room || !isRoomDriver()) return;
     net.actionPolling = true;
     try {
       const result = await api(`/api/rooms/${net.room.code}/actions`, { token: net.account.token });
@@ -285,7 +289,25 @@ function startRoomFallbacks() {
   }, 450);
 }
 
+async function refreshRoomDriver() {
+  if (net.driverPolling || !net.room || !net.account) return;
+  net.driverPolling = true;
+  try {
+    const update = await api(`/api/rooms/${net.room.code}/driver`, { token: net.account.token });
+    if (update.room) {
+      net.room = { ...net.room, ...update.room };
+      updateRoomText();
+    }
+    if (update.state) applyRemoteState(update.state);
+  } catch (error) {
+    console.warn("房间执行权同步失败", error);
+  } finally {
+    net.driverPolling = false;
+  }
+}
+
 function isHost() { return !net.room || net.room.host === net.account?.token; }
+function isRoomDriver() { return !net.room || net.room.isDriver === true; }
 function updateRoomText() {
   if (!net.room) {
     el.roomText.textContent = "本地练习";
@@ -312,19 +334,22 @@ function updateRoomText() {
 }
 async function requestAction(action, payload = {}) {
   if (!net.room) return dispatchAction(action, payload, state.selfSeat);
-  if (isHost()) {
-    if (action === "start" || action === "reset") {
-      try {
-        const result = await api(`/api/rooms/${net.room.code}/action`, { token: net.account.token, action, payload });
-        if (result.room) {
-          net.room = { ...net.room, ...result.room };
-          updateRoomText();
-        }
-      } catch (error) {
-        alert(error.message);
-        return;
+  if (isHost() && (action === "start" || action === "reset")) {
+    try {
+      const result = await api(`/api/rooms/${net.room.code}/action`, { token: net.account.token, action, payload });
+      if (result.room) {
+        net.room = { ...net.room, ...result.room };
+        updateRoomText();
       }
+      await refreshRoomDriver();
+      if (!isRoomDriver()) return alert("当前由其他设备维持牌局，请稍后再试");
+    } catch (error) {
+      alert(error.message);
+      return;
     }
+    return dispatchAction(action, payload, state.selfSeat);
+  }
+  if (isRoomDriver()) {
     return dispatchAction(action, payload, state.selfSeat);
   }
   try {
@@ -344,10 +369,11 @@ function dispatchAction(action, payload = {}, seat = state.selfSeat) {
   if (action === "discard") discardTile(state.current, payload.tileIndex);
 }
 let syncTimer;
+let aiTimer;
 let youjinDrawTimer;
 let dismissedSettlementRound = null;
 function scheduleSync() {
-  if (!net.room || !isHost() || state.phase === "idle") return;
+  if (!net.room || !isRoomDriver() || state.phase === "idle") return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {
     net.syncing = true;
@@ -359,6 +385,8 @@ function scheduleSync() {
 
 function startRound() {
   clearTimeout(youjinDrawTimer);
+  clearTimeout(aiTimer);
+  aiTimer = null;
   state.mode = el.modeSelect.value;
   state.round += 1;
   state.winner = null;
@@ -406,7 +434,7 @@ function startRound() {
     state.current = starter;
     addLog(`${state.players[starter].name} 起手三金倒，可选择胡或过。`);
     render();
-    if (!state.players[starter].human && (!net.room || isHost())) {
+    if (!state.players[starter].human && (!net.room || isRoomDriver())) {
       window.setTimeout(() => {
         if (state.phase === "playing" && state.pendingThreeGold === starter) finishRound(starter, "three-gold");
       }, 1000);
@@ -882,8 +910,20 @@ function claimChi(index, tile, from, option = getChiOptions(state.players[index]
 }
 
 function queueAiTurn() {
-  if (net.room && !isHost()) return;
-  window.setTimeout(() => runAiTurn(), 2000);
+  if (net.room && !isRoomDriver()) return;
+  if (aiTimer != null) return;
+  aiTimer = window.setTimeout(() => {
+    aiTimer = null;
+    runAiTurn();
+  }, 2000);
+}
+
+function ensureAiProgress() {
+  if (net.room && !isRoomDriver()) return;
+  if (state.phase !== "playing" || state.pendingClaim || state.pendingThreeGold != null) return;
+  if (state.pendingYoujin?.awaitingDiscard || state.pendingYoujin?.awaitingSelfHu != null) return;
+  const player = state.players[state.current];
+  if (player && !player.human) queueAiTurn();
 }
 
 function runAiTurn() {
@@ -1205,6 +1245,8 @@ function removeMatchingById(hand, id, amount) {
 
 function finishRound(index, type, tile = null, from = null) {
   clearTimeout(youjinDrawTimer);
+  clearTimeout(aiTimer);
+  aiTimer = null;
   state.phase = "ended";
   state.winner = index;
   state.dealer = index;
@@ -1224,6 +1266,8 @@ function finishRound(index, type, tile = null, from = null) {
 
 function finishDraw() {
   clearTimeout(youjinDrawTimer);
+  clearTimeout(aiTimer);
+  aiTimer = null;
   state.phase = "ended";
   state.winner = null;
   const before = [...state.scores];
