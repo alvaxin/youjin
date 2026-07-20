@@ -33,7 +33,7 @@ function Save-Tile([int]$column, [int]$y, [int]$height, [string]$name) {
 1..9 | ForEach-Object { Save-Tile ($_ - 1) 326 105 "W$_" }
 1..9 | ForEach-Object { Save-Tile ($_ - 1) 433 105 "T$_" }
 
-@('H5', 'H7', 'H8', 'H6', 'H1', 'H2', 'H3', 'H4') | ForEach-Object -Begin { $i = 0 } -Process { Save-Tile $i 540 115 $_; $i++ }
+@('H5', 'H6', 'H7', 'H8', 'H1', 'H2', 'H3', 'H4') | ForEach-Object -Begin { $i = 0 } -Process { Save-Tile $i 540 115 $_; $i++ }
 @('E', 'S', 'X', 'N', 'Z', 'F', 'P') | ForEach-Object -Begin { $i = 0 } -Process { Save-Tile $i 657 120 $_; $i++ }
 
 $image.Dispose()

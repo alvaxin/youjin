@@ -23,7 +23,7 @@ def main() -> None:
             save_tile(image, x, 326, 72, 105, f"W{rank}")
             save_tile(image, x, 433, 72, 105, f"T{rank}")
 
-        for column, name in enumerate(("H5", "H7", "H8", "H6", "H1", "H2", "H3", "H4")):
+        for column, name in enumerate(("H5", "H6", "H7", "H8", "H1", "H2", "H3", "H4")):
             save_tile(image, 60 + column * 84, 540, 82, 115, name)
         for column, name in enumerate(("E", "S", "X", "N", "Z", "F", "P")):
             save_tile(image, 60 + column * 84, 657, 82, 120, name)
