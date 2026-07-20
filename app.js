@@ -167,7 +167,13 @@ function shuffle(items) {
 
 async function api(path, body) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await response.json();
+  const raw = await response.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    throw new Error(response.ok ? "服务返回了无法识别的数据，请刷新页面后重试" : `服务器连接失败（${response.status}），请稍后重试`);
+  }
   if (!response.ok) throw new Error(data.error || "网络请求失败");
   return data;
 }
