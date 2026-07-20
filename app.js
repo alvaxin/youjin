@@ -256,7 +256,7 @@ function handleRemoteAction(request) {
 
 function startRoomFallbacks() {
   net.statePoll = window.setInterval(async () => {
-    if (net.statePolling || !net.room) return;
+    if (net.statePolling || !net.room || isRoomDriver()) return;
     net.statePolling = true;
     try {
       const update = await getApi(`/api/rooms/${net.room.code}/state?token=${encodeURIComponent(net.account.token)}`);
@@ -270,7 +270,7 @@ function startRoomFallbacks() {
     } finally {
       net.statePolling = false;
     }
-  }, 700);
+  }, 250);
 
   refreshRoomDriver();
   net.driverPoll = window.setInterval(refreshRoomDriver, 1000);
@@ -286,7 +286,7 @@ function startRoomFallbacks() {
     } finally {
       net.actionPolling = false;
     }
-  }, 450);
+  }, 150);
 }
 
 async function refreshRoomDriver() {
@@ -384,7 +384,7 @@ function scheduleSync() {
     try { await api(`/api/rooms/${net.room.code}/state`, { token: net.account.token, state }); }
     catch (error) { console.warn(error); }
     finally { net.syncing = false; }
-  }, 80);
+  }, 20);
 }
 
 function startRound() {
