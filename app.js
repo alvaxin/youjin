@@ -366,6 +366,11 @@ function dispatchAction(action, payload = {}, seat = state.selfSeat) {
   if (action === "start") { if (isHost()) startRound(); return; }
   if (action === "reset") { if (isHost()) resetScores(); return; }
   if (seat !== state.current) return;
+  if (action === "timeout") {
+    const context = getTimedActionContext();
+    if (context && payload.key === state.actionTimerKey && payload.key === context.key) resolveActionTimeout(context);
+    return;
+  }
   if (action === "claim") claimForHuman(payload.type, payload.option);
   if (action === "hu") {
     if (state.pendingClaim) claimForHuman("hu");
@@ -379,6 +384,10 @@ let syncTimer;
 let aiTimer;
 let youjinDrawTimer;
 let actionClockTimer;
+let actionDeadlineTimer;
+let actionDeadlineTimerKey = null;
+let actionDeadlineTimerAt = null;
+let timeoutRequestKey = null;
 let lastCountdownSound = null;
 let countdownAudio = null;
 let dismissedSettlementRound = null;
@@ -432,13 +441,31 @@ function syncActionClock() {
     lastCountdownSound = null;
   }
 
+  if (controlsClock) armActionDeadline(context);
   if (!actionClockTimer) actionClockTimer = window.setInterval(updateActionClock, 250);
   updateActionClock();
 }
 
+function armActionDeadline(context) {
+  if (actionDeadlineTimer && actionDeadlineTimerKey === context.key && actionDeadlineTimerAt === state.actionDeadline) return;
+  clearTimeout(actionDeadlineTimer);
+  actionDeadlineTimerKey = context.key;
+  actionDeadlineTimerAt = state.actionDeadline;
+  actionDeadlineTimer = window.setTimeout(() => {
+    actionDeadlineTimer = null;
+    const current = getTimedActionContext();
+    if (current?.key === context.key && state.actionTimerKey === context.key) resolveActionTimeout(current);
+  }, Math.max(0, state.actionDeadline - Date.now()) + 5);
+}
+
 function stopActionClock() {
   clearInterval(actionClockTimer);
+  clearTimeout(actionDeadlineTimer);
   actionClockTimer = null;
+  actionDeadlineTimer = null;
+  actionDeadlineTimerKey = null;
+  actionDeadlineTimerAt = null;
+  timeoutRequestKey = null;
   lastCountdownSound = null;
   el.actionCountdown.hidden = true;
   el.actionCountdown.textContent = "";
@@ -459,8 +486,13 @@ function updateActionClock() {
     playCountdownTone(seconds);
   }
 
-  if (seconds !== 0 || (net.room && !isRoomDriver())) return;
-  resolveActionTimeout(context);
+  if (seconds !== 0) return;
+  if (!net.room || isRoomDriver()) {
+    resolveActionTimeout(context);
+  } else if (state.selfSeat === context.index && timeoutRequestKey !== context.key) {
+    timeoutRequestKey = context.key;
+    requestAction("timeout", { key: context.key });
+  }
 }
 
 function resolveActionTimeout(context) {
