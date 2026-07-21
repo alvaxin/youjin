@@ -400,6 +400,7 @@ let dismissedSettlementRound = null;
 let lastPlayedAudioEventId = 0;
 let audioPlaybackQueue = [];
 let audioPlaybackActive = false;
+const AI_ACTION_DELAY_MS = 3000;
 
 function usesActionClock() {
   return state.phase === "playing" && state.players.filter((player) => player.human).length >= 2;
@@ -1106,7 +1107,7 @@ function queueAiTurn() {
   aiTimer = window.setTimeout(() => {
     aiTimer = null;
     runAiTurn();
-  }, 2000);
+  }, AI_ACTION_DELAY_MS);
 }
 
 function ensureAiProgress() {
