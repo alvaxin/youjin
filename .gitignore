@@ -1,9 +1,14 @@
 node_modules/
 .env
 *.log
+*.log.*
 tunnel*.log
 Thumbs.db
 Desktop.ini
 __pycache__/
 *.pyc
 tools/cloudflared.exe
+tools/natapp/
+tools/natapp-client/
+tools/cpolar/
+tools/run-youjin-server.cmd
