@@ -1,11 +1,11 @@
-const CACHE_NAME = "youjin-assets-v2";
+const CACHE_NAME = "youjin-assets-v3";
 const tilePaths = [
   ...["B", "T", "W"].flatMap((family) => Array.from({ length: 9 }, (_, index) => `/assets/tiles/${family}${index + 1}.png`)),
   ...["E", "S", "X", "N", "Z", "F", "P"].map((id) => `/assets/tiles/${id}.png`),
   ...Array.from({ length: 8 }, (_, index) => `/assets/tiles/H${index + 1}.png`)
 ];
 const audioPaths = [
-  "gold-prefix", "chi", "peng", "gang", "hu", "youjin", "E", "S", "X", "N", "Z", "F", "P",
+  "gold-prefix", "flower-prefix", "chi", "peng", "gang", "hu", "youjin", "E", "S", "X", "N", "Z", "F", "P",
   ...Array.from({ length: 8 }, (_, index) => `H${index + 1}`),
   ...["B", "T", "W"].flatMap((family) => Array.from({ length: 9 }, (_, index) => `${family}${index + 1}`))
 ].map((id) => `/assets/audio/${id}.wav`);

@@ -704,7 +704,7 @@ function drawForPlayer(index) {
   while (tile && isFlower(tile)) {
     player.hand = player.hand.filter((item) => item !== tile);
     player.flowers.push(tile);
-    emitAudioCue("tile", tile);
+    emitAudioCue("flower", tile);
     addLog(`${player.name} 补花 ${tileName(tile)}。`);
     tile = drawFromDeadWall();
     if (tile) player.hand.push(tile);
@@ -1074,7 +1074,7 @@ function drawAfterGang(index) {
   while (tile && isFlower(tile)) {
     player.hand = player.hand.filter((item) => item !== tile);
     player.flowers.push(tile);
-    emitAudioCue("tile", tile);
+    emitAudioCue("flower", tile);
     addLog(`${player.name} 杠后补花 ${tileName(tile)}。`);
     tile = drawFromDeadWall();
     if (tile) player.hand.push(tile);
@@ -1740,9 +1740,11 @@ function playPendingAudioEvents() {
   pending.forEach((event) => {
     const clips = event.type === "gold"
       ? ["gold-prefix", event.tileId]
-      : event.type === "tile"
-        ? [event.tileId]
-        : [event.type];
+      : event.type === "flower"
+        ? ["flower-prefix", event.tileId]
+        : event.type === "tile"
+          ? [event.tileId]
+          : [event.type];
     audioPlaybackQueue.push(...clips.filter(Boolean));
   });
   playNextAudioClip();
