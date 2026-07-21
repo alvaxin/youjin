@@ -899,6 +899,7 @@ function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4
     }
     if (!isGold(tile) && countMatching(player.hand, tile) >= 2) {
       removeMatching(player.hand, tile, 2);
+      takeClaimedDiscard(from, tile);
       player.melds.push({ type: "peng", tiles: [tile, tile, tile], from });
       emitAudioCue("peng");
       addLog(`${player.name} 碰 ${tileName(tile)}。`);
@@ -1010,10 +1011,20 @@ function getActiveClaim() {
   return state.pendingClaim?.claims[state.pendingClaim.position] || null;
 }
 
+function takeClaimedDiscard(from, tile) {
+  const discardIndex = state.players[from]?.discards.findLastIndex((item) => item.instanceId === tile.instanceId) ?? -1;
+  if (discardIndex >= 0) state.players[from].discards.splice(discardIndex, 1);
+
+  const tableIndex = state.discards.findLastIndex((item) => item.instanceId === tile.instanceId);
+  if (tableIndex >= 0) state.discards.splice(tableIndex, 1);
+  if (state.lastDiscard?.tile.instanceId === tile.instanceId) state.lastDiscard = null;
+}
+
 function claimPeng(index, tile, from) {
   if (state.pendingYoujin || isGold(tile)) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 2);
+  takeClaimedDiscard(from, tile);
   player.melds.push({ type: "peng", tiles: [...used, tile], from });
   emitAudioCue("peng");
   addLog(`${player.name} 碰 ${tileName(tile)}。`);
@@ -1028,6 +1039,7 @@ function claimMingGang(index, tile, from) {
   if (state.pendingYoujin || isGold(tile)) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 3);
+  takeClaimedDiscard(from, tile);
   player.melds.push({ type: "ming-gang", tiles: [...used, tile], from });
   emitAudioCue("gang");
   addLog(`${player.name} 明杠 ${tileName(tile)}。`);
@@ -1091,6 +1103,7 @@ function claimChi(index, tile, from, option = getChiOptions(state.players[index]
   const player = state.players[index];
   if (!option) return;
   const used = option.map(({ family, rank }) => removeNormalized(player.hand, family, rank));
+  takeClaimedDiscard(from, tile);
   player.melds.push({ type: "chi", tiles: [...used, tile], from });
   emitAudioCue("chi");
   addLog(`${player.name} 吃 ${tileName(tile)}。`);
