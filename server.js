@@ -7,7 +7,7 @@ const root = __dirname;
 const clients = new Map();
 const rooms = new Map();
 const accounts = new Map();
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.wav': 'audio/wav' };
 function json(res, status, body) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(body)); }
 function read(req) { return new Promise((resolve, reject) => { let raw=''; req.on('data', d => raw += d); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); } }); }); }
 function user(token) { return accounts.get(token); }
@@ -48,6 +48,6 @@ const server=http.createServer(async(req,res)=>{
     if(operation==='actions'){ if(!renewDriver(room,body.token))return json(res,409,{error:'当前由其他玩家处理操作'}); const actions=room.actions.splice(0); return json(res,200,{actions}); }
     if(operation==='action'){ const member=room.members.find(item=>item.token===body.token); if(['start','reset'].includes(body.action)&&room.host!==body.token)return json(res,403,{error:'只有房主可执行此操作'}); if(body.action==='start'){ room.status='playing'; pushRoom(room); } const action={id:room.nextActionId++,from:body.token,seat:member.seat,action:body.action,payload:body.payload||{}}; if(room.driver!==body.token)room.actions.push(action); push(room,'action',action); return json(res,200,{ok:true,room:publicRoom(room,body.token)}); }
   }
-  const file=url.pathname==='/'?'index.html':url.pathname.slice(1); const target=path.join(root,file); if(!target.startsWith(root)||!fs.existsSync(target))return json(res,404,{error:'not found'}); const extension=path.extname(target); const headers={'Content-Type':mime[extension]||'application/octet-stream'}; if(url.pathname.startsWith('/assets/tiles/')&&extension==='.png')headers['Cache-Control']='public, max-age=31536000, immutable'; else headers['Cache-Control']='no-cache'; res.writeHead(200,headers); fs.createReadStream(target).pipe(res);
+  const file=url.pathname==='/'?'index.html':url.pathname.slice(1); const target=path.join(root,file); if(!target.startsWith(root)||!fs.existsSync(target))return json(res,404,{error:'not found'}); const extension=path.extname(target); const headers={'Content-Type':mime[extension]||'application/octet-stream'}; if((url.pathname.startsWith('/assets/tiles/')&&extension==='.png')||(url.pathname.startsWith('/assets/audio/')&&extension==='.wav'))headers['Cache-Control']='public, max-age=31536000, immutable'; else headers['Cache-Control']='no-cache'; res.writeHead(200,headers); fs.createReadStream(target).pipe(res);
 });
 server.listen(process.env.PORT||4173,()=>console.log('游金麻将服务已启动: http://localhost:4173'));

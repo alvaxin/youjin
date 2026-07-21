@@ -62,6 +62,8 @@ const state = {
   scores: [1000, 1000, 1000, 1000],
   lastScoreChanges: [0, 0, 0, 0],
   lastSettlement: null,
+  audioEvents: [],
+  audioSequence: 0,
   log: [],
   selfSeat: 0
 };
@@ -110,7 +112,7 @@ const el = {
   closeSettlementBtn: document.querySelector("#closeSettlementBtn")
 };
 
-const net = { account: null, room: null, events: null, syncing: false, statePoll: null, actionPoll: null, driverPoll: null, aiWatchdog: null, statePolling: false, actionPolling: false, driverPolling: false, handledActions: new Set() };
+const net = { account: null, room: null, events: null, syncing: false, statePoll: null, actionPoll: null, driverPoll: null, aiWatchdog: null, statePolling: false, actionPolling: false, driverPolling: false, receivedState: false, handledActions: new Set() };
 el.newRoundBtn.addEventListener("click", () => requestAction("start"));
 el.resetScoresBtn.addEventListener("click", () => requestAction("reset"));
 el.chiBtn.addEventListener("click", () => requestAction("claim", { type: "chi" }));
@@ -226,6 +228,7 @@ function connectRoom() {
   clearInterval(net.driverPoll);
   clearInterval(net.aiWatchdog);
   net.handledActions.clear();
+  net.receivedState = false;
   net.events = new EventSource(`/api/rooms/${net.room.code}/events?token=${encodeURIComponent(net.account.token)}`);
   net.events.addEventListener("room", (event) => { net.room = { ...net.room, ...JSON.parse(event.data) }; updateRoomText(); });
   net.events.addEventListener("members", (event) => { const update = JSON.parse(event.data); net.room = { ...net.room, members: update.members }; updateRoomText(); });
@@ -242,7 +245,10 @@ function connectRoom() {
 
 function applyRemoteState(snapshot) {
   if (!snapshot) return;
+  const skipExistingAudio = !net.receivedState;
   Object.assign(state, snapshot, { selfSeat: net.room.mySeat ?? 0 });
+  if (skipExistingAudio) lastPlayedAudioEventId = state.audioEvents?.at(-1)?.id || 0;
+  net.receivedState = true;
   render();
 }
 
@@ -391,6 +397,9 @@ let timeoutRequestKey = null;
 let lastCountdownSound = null;
 let countdownAudio = null;
 let dismissedSettlementRound = null;
+let lastPlayedAudioEventId = 0;
+let audioPlaybackQueue = [];
+let audioPlaybackActive = false;
 
 function usesActionClock() {
   return state.phase === "playing" && state.players.filter((player) => player.human).length >= 2;
@@ -568,6 +577,7 @@ function startRound() {
   state.dealer = state.dealer ?? Math.floor(Math.random() * 4);
   state.current = state.dealer;
   state.log = [];
+  state.audioEvents = [];
 
   const members = net.room?.members || [{ name: net.account?.name || "玩家 1", seat: 0 }];
   state.players = Array.from({ length: 4 }, (_, i) => ({
@@ -667,6 +677,7 @@ function openGold() {
 
     state.goldIndicator = indicator;
     state.gold = indicator;
+    emitAudioCue("gold", indicator);
     addLog(`${opener.name} 开金，翻出 ${tileName(indicator)}。`);
     return;
   }
@@ -693,6 +704,7 @@ function drawForPlayer(index) {
   while (tile && isFlower(tile)) {
     player.hand = player.hand.filter((item) => item !== tile);
     player.flowers.push(tile);
+    emitAudioCue("tile", tile);
     addLog(`${player.name} 补花 ${tileName(tile)}。`);
     tile = drawFromDeadWall();
     if (tile) player.hand.push(tile);
@@ -724,6 +736,7 @@ function discardTile(index, tileIndex) {
   if (youjinDeclaration && (!selectedTile || !allowedYoujinTileIds.includes(selectedTile.instanceId))) return;
   const [tile] = player.hand.splice(tileIndex, 1);
   player.discards.push(tile);
+  emitAudioCue("tile", tile);
   state.lastDiscard = { tile, from: index };
   state.discards.push(tile);
   player.drewThisTurn = false;
@@ -886,6 +899,7 @@ function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4
     if (!isGold(tile) && countMatching(player.hand, tile) >= 2) {
       removeMatching(player.hand, tile, 2);
       player.melds.push({ type: "peng", tiles: [tile, tile, tile], from });
+      emitAudioCue("peng");
       addLog(`${player.name} 碰 ${tileName(tile)}。`);
       state.current = index;
       player.drewThisTurn = true;
@@ -1000,6 +1014,7 @@ function claimPeng(index, tile, from) {
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 2);
   player.melds.push({ type: "peng", tiles: [...used, tile], from });
+  emitAudioCue("peng");
   addLog(`${player.name} 碰 ${tileName(tile)}。`);
   state.current = index;
   player.drewThisTurn = true;
@@ -1013,6 +1028,7 @@ function claimMingGang(index, tile, from) {
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 3);
   player.melds.push({ type: "ming-gang", tiles: [...used, tile], from });
+  emitAudioCue("gang");
   addLog(`${player.name} 明杠 ${tileName(tile)}。`);
   state.current = index;
   player.drewThisTurn = true;
@@ -1039,6 +1055,7 @@ function claimSelfGang(index) {
     addLog(`${player.name} 补杠 ${tileName(tile)}，按明杠处理。`);
   }
 
+  emitAudioCue("gang");
   drawAfterGang(index);
   player.drewThisTurn = true;
   sortHand(player);
@@ -1057,6 +1074,7 @@ function drawAfterGang(index) {
   while (tile && isFlower(tile)) {
     player.hand = player.hand.filter((item) => item !== tile);
     player.flowers.push(tile);
+    emitAudioCue("tile", tile);
     addLog(`${player.name} 杠后补花 ${tileName(tile)}。`);
     tile = drawFromDeadWall();
     if (tile) player.hand.push(tile);
@@ -1073,6 +1091,7 @@ function claimChi(index, tile, from, option = getChiOptions(state.players[index]
   if (!option) return;
   const used = option.map(({ family, rank }) => removeNormalized(player.hand, family, rank));
   player.melds.push({ type: "chi", tiles: [...used, tile], from });
+  emitAudioCue("chi");
   addLog(`${player.name} 吃 ${tileName(tile)}。`);
   state.current = index;
   player.drewThisTurn = true;
@@ -1168,6 +1187,7 @@ function declareYoujin(index) {
   const options = getYoujinDiscardOptions(index);
   if (state.phase !== "playing" || state.pendingThreeGold != null || state.pendingYoujin || !player.drewThisTurn || !options.length) return;
   player.declaredYoujin = true;
+  emitAudioCue("youjin");
   state.pendingYoujin = { index, remaining: 3, awaitingDiscard: true, discardTileIds: options.map((tile) => tile.instanceId) };
   addLog(`${player.name} 声明游金，请打出高亮的对应牌。`);
   render();
@@ -1430,6 +1450,7 @@ function finishRound(index, type, tile = null, from = null) {
   state.phase = "ended";
   state.winner = index;
   state.dealer = index;
+  emitAudioCue("hu");
   const score = settleScores(index, type);
   const typeText = {
     discard: `胡 ${state.players[from]?.name || ""} 打出的 ${tileName(tile)}`,
@@ -1586,6 +1607,7 @@ function render() {
 
   renderScoreDetails();
   renderSettlement();
+  playPendingAudioEvents();
   scheduleSync();
 }
 
@@ -1702,6 +1724,48 @@ function rollDice() {
 
 function addLog(text) {
   state.log.push(text);
+}
+
+function emitAudioCue(type, tile = null) {
+  const id = ++state.audioSequence;
+  state.audioEvents = [...(state.audioEvents || []), { id, type, tileId: tile?.id || null }].slice(-16);
+}
+
+function playPendingAudioEvents() {
+  const events = state.audioEvents || [];
+  const pending = events.filter((event) => event.id > lastPlayedAudioEventId);
+  if (!pending.length) return;
+
+  lastPlayedAudioEventId = pending[pending.length - 1].id;
+  pending.forEach((event) => {
+    const clips = event.type === "gold"
+      ? ["gold-prefix", event.tileId]
+      : event.type === "tile"
+        ? [event.tileId]
+        : [event.type];
+    audioPlaybackQueue.push(...clips.filter(Boolean));
+  });
+  playNextAudioClip();
+}
+
+function playNextAudioClip() {
+  if (audioPlaybackActive || !audioPlaybackQueue.length) return;
+
+  const clip = audioPlaybackQueue.shift();
+  const audio = new Audio(`assets/audio/${clip}.wav`);
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    audioPlaybackActive = false;
+    playNextAudioClip();
+  };
+
+  audioPlaybackActive = true;
+  audio.volume = 0.9;
+  audio.addEventListener("ended", finish, { once: true });
+  audio.addEventListener("error", finish, { once: true });
+  audio.play().catch(finish);
 }
 
 function claimTypeName(type) {
