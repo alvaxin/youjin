@@ -56,6 +56,8 @@ const state = {
   pendingThreeGold: null,
   pendingYoujin: null,
   pendingClaim: null,
+  actionDeadline: null,
+  actionTimerKey: null,
   startGoldCounts: [0, 0, 0, 0],
   scores: [1000, 1000, 1000, 1000],
   lastScoreChanges: [0, 0, 0, 0],
@@ -98,6 +100,7 @@ const el = {
   selfHand: document.querySelector("#selfHand"),
   turnText: document.querySelector("#turnText"),
   turnPointer: document.querySelector("#turnPointer"),
+  actionCountdown: document.querySelector("#actionCountdown"),
   lastDiscard: document.querySelector("#lastDiscard"),
   resultText: document.querySelector("#resultText"),
   logList: document.querySelector("#logList"),
@@ -375,7 +378,132 @@ function dispatchAction(action, payload = {}, seat = state.selfSeat) {
 let syncTimer;
 let aiTimer;
 let youjinDrawTimer;
+let actionClockTimer;
+let lastCountdownSound = null;
+let countdownAudio = null;
 let dismissedSettlementRound = null;
+
+function usesActionClock() {
+  return state.phase === "playing" && state.players.filter((player) => player.human).length >= 2;
+}
+
+function getTimedActionContext() {
+  if (!usesActionClock()) return null;
+
+  if (state.pendingClaim) {
+    const claim = getActiveClaim();
+    if (!claim || !state.players[claim.index]?.human) return null;
+    return { key: `claim:${claim.index}:${state.pendingClaim.from}:${state.pendingClaim.tile.instanceId}:${state.pendingClaim.position}`, index: claim.index, type: "pass" };
+  }
+
+  if (state.pendingThreeGold != null && state.players[state.pendingThreeGold]?.human) {
+    return { key: `three-gold:${state.pendingThreeGold}:${state.round}`, index: state.pendingThreeGold, type: "pass" };
+  }
+
+  if (state.pendingYoujin?.awaitingDiscard && state.players[state.pendingYoujin.index]?.human) {
+    return { key: `youjin-discard:${state.pendingYoujin.index}:${state.round}`, index: state.pendingYoujin.index, type: "pass" };
+  }
+
+  if (state.pendingYoujin?.awaitingSelfHu != null && state.players[state.pendingYoujin.awaitingSelfHu]?.human) {
+    return { key: `youjin-hu:${state.pendingYoujin.awaitingSelfHu}:${state.round}`, index: state.pendingYoujin.awaitingSelfHu, type: "pass" };
+  }
+
+  if (state.pendingYoujin) return null;
+  const player = state.players[state.current];
+  if (!player?.human || !player.drewThisTurn) return null;
+  return { key: `discard:${state.round}:${state.current}:${player.drawnTileId || "claim"}:${player.mustDiscardAfterClaim}:${player.passedSelfHu}`, index: state.current, type: "discard" };
+}
+
+function syncActionClock() {
+  const context = getTimedActionContext();
+  const controlsClock = !net.room || isRoomDriver();
+  if (!context) {
+    if (controlsClock) {
+      state.actionDeadline = null;
+      state.actionTimerKey = null;
+    }
+    stopActionClock();
+    return;
+  }
+
+  if (controlsClock && (state.actionTimerKey !== context.key || !Number.isFinite(state.actionDeadline))) {
+    state.actionTimerKey = context.key;
+    state.actionDeadline = Date.now() + 60000;
+    lastCountdownSound = null;
+  }
+
+  if (!actionClockTimer) actionClockTimer = window.setInterval(updateActionClock, 250);
+  updateActionClock();
+}
+
+function stopActionClock() {
+  clearInterval(actionClockTimer);
+  actionClockTimer = null;
+  lastCountdownSound = null;
+  el.actionCountdown.hidden = true;
+  el.actionCountdown.textContent = "";
+}
+
+function updateActionClock() {
+  const context = getTimedActionContext();
+  if (!context || state.actionTimerKey !== context.key || !Number.isFinite(state.actionDeadline)) {
+    stopActionClock();
+    return;
+  }
+
+  const seconds = Math.max(0, Math.ceil((state.actionDeadline - Date.now()) / 1000));
+  el.actionCountdown.hidden = seconds > 15;
+  el.actionCountdown.textContent = seconds > 15 ? "" : `${seconds} 秒`;
+  if (seconds > 0 && seconds <= 15 && lastCountdownSound !== seconds) {
+    lastCountdownSound = seconds;
+    playCountdownTone(seconds);
+  }
+
+  if (seconds !== 0 || (net.room && !isRoomDriver())) return;
+  resolveActionTimeout(context);
+}
+
+function resolveActionTimeout(context) {
+  if (state.actionTimerKey !== context.key || state.phase !== "playing") return;
+  state.actionDeadline = null;
+  state.actionTimerKey = null;
+  const player = state.players[context.index];
+  if (!player) return;
+
+  if (context.type === "discard") {
+    let tileIndex = player.hand.findIndex((tile) => tile.instanceId === player.drawnTileId);
+    if (tileIndex < 0) tileIndex = chooseDiscardIndex(player);
+    if (tileIndex >= 0) {
+      addLog(`${player.name} 操作超时，自动打出 ${tileName(player.hand[tileIndex])}。`);
+      discardTile(context.index, tileIndex);
+    }
+    return;
+  }
+
+  addLog(`${player.name} 操作超时，自动选择过。`);
+  passHumanClaim();
+}
+
+function playCountdownTone(seconds) {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    countdownAudio ||= new AudioContext();
+    countdownAudio.resume().catch(() => {});
+    const oscillator = countdownAudio.createOscillator();
+    const gain = countdownAudio.createGain();
+    oscillator.frequency.value = seconds <= 5 ? 880 : 660;
+    gain.gain.setValueAtTime(0.0001, countdownAudio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, countdownAudio.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, countdownAudio.currentTime + 0.12);
+    oscillator.connect(gain).connect(countdownAudio.destination);
+    oscillator.start();
+    oscillator.stop(countdownAudio.currentTime + 0.13);
+  } catch (_) {
+    // Browsers may block audio before a player interacts with the page.
+  }
+}
+
 function scheduleSync() {
   if (!net.room || !isRoomDriver() || state.phase === "idle") return;
   clearTimeout(syncTimer);
@@ -397,6 +525,8 @@ function startRound() {
   state.pendingThreeGold = null;
   state.pendingYoujin = null;
   state.pendingClaim = null;
+  state.actionDeadline = null;
+  state.actionTimerKey = null;
   state.phase = "playing";
   state.discards = [];
   state.lastDiscard = null;
@@ -869,7 +999,7 @@ function claimSelfGang(index) {
     const [tile] = player.hand.splice(tileIndex, 1);
     option.meld.type = "ming-gang";
     option.meld.tiles.push(tile);
-    addLog(`${player.name} 补杠 ${tileName(tile)}。`);
+    addLog(`${player.name} 补杠 ${tileName(tile)}，按明杠处理。`);
   }
 
   drawAfterGang(index);
@@ -1195,8 +1325,9 @@ function countMatching(hand, tile) {
 }
 
 function getSelfGangOptions(player) {
-  if (!player.drewThisTurn || state.pendingClaim) return [];
+  if (!player.drewThisTurn || state.pendingClaim || player.mustDiscardAfterClaim) return [];
   const options = [];
+  const drawnTile = player.hand.find((tile) => tile.instanceId === player.drawnTileId);
   const counts = new Map();
   for (const tile of player.hand) {
     if (isGold(tile)) continue;
@@ -1206,18 +1337,22 @@ function getSelfGangOptions(player) {
   }
 
   for (const [id, tiles] of counts.entries()) {
-    if (tiles.length >= 4) options.push({ type: "an-gang", id });
+    if (tiles.length >= 4) options.push({ type: "an-gang", id, isDrawnTile: drawnTile && sameTileKey(drawnTile) === id });
   }
 
   for (const meld of player.melds) {
     if (meld.type !== "peng") continue;
     const id = sameTileKey(meld.tiles[0]);
     if (player.hand.some((tile) => sameTileKey(tile) === id && !isGold(tile))) {
-      options.push({ type: "bu-gang", id, meld });
+      options.push({ type: "bu-gang", id, meld, isDrawnTile: drawnTile && sameTileKey(drawnTile) === id });
     }
   }
 
-  return options;
+  return options.sort((a, b) => {
+    if (a.type === "bu-gang" && a.isDrawnTile !== (b.type === "bu-gang" && b.isDrawnTile)) return -1;
+    if (b.type === "bu-gang" && b.isDrawnTile !== (a.type === "bu-gang" && a.isDrawnTile)) return 1;
+    return a.type.localeCompare(b.type);
+  });
 }
 
 function sameTileKey(tile) {
@@ -1251,6 +1386,8 @@ function finishRound(index, type, tile = null, from = null) {
   clearTimeout(youjinDrawTimer);
   clearTimeout(aiTimer);
   aiTimer = null;
+  state.actionDeadline = null;
+  state.actionTimerKey = null;
   state.phase = "ended";
   state.winner = index;
   state.dealer = index;
@@ -1272,6 +1409,8 @@ function finishDraw() {
   clearTimeout(youjinDrawTimer);
   clearTimeout(aiTimer);
   aiTimer = null;
+  state.actionDeadline = null;
+  state.actionTimerKey = null;
   state.phase = "ended";
   state.winner = null;
   const before = [...state.scores];
@@ -1343,6 +1482,7 @@ function calcFlowerWater(flowers) {
 }
 
 function render() {
+  syncActionClock();
   if (state.phase === "playing") {
     dismissedSettlementRound = null;
     el.settlementPanel.hidden = true;
