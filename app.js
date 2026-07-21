@@ -807,6 +807,7 @@ function playYoujinDrawTurn(index) {
 }
 
 function resolveClaims(from, tile) {
+  if (state.pendingYoujin) return false;
   const order = [1, 2, 3].map((n) => (from + n) % 4);
   for (const index of order) {
     if (canWinByDiscard(index, tile)) {
@@ -830,6 +831,7 @@ function resolveClaims(from, tile) {
 }
 
 function prepareHumanClaim(from, tile, order) {
+  if (state.pendingYoujin) return false;
   const humanClaims = [];
   for (const index of order) {
     const player = state.players[index];
@@ -850,6 +852,7 @@ function prepareHumanClaim(from, tile, order) {
 }
 
 function getHumanClaimTypes(index, from, tile) {
+  if (state.pendingYoujin) return [];
   const player = state.players[index];
   const types = [];
   if (canWinByDiscard(index, tile)) types.push("hu");
@@ -870,6 +873,7 @@ function activatePendingClaim() {
 }
 
 function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4)) {
+  if (state.pendingYoujin) return false;
   for (const index of order) {
     const player = state.players[index];
     if (player.human) continue;
@@ -903,6 +907,7 @@ function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4
 }
 
 function claimForHuman(type, chiOptionIndex) {
+  if (state.pendingYoujin) return;
   const claim = state.pendingClaim;
   if (claim) {
     if (state.phase !== "playing" || !claim.types.includes(type)) return;
@@ -991,7 +996,7 @@ function getActiveClaim() {
 }
 
 function claimPeng(index, tile, from) {
-  if (isGold(tile)) return;
+  if (state.pendingYoujin || isGold(tile)) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 2);
   player.melds.push({ type: "peng", tiles: [...used, tile], from });
@@ -1004,7 +1009,7 @@ function claimPeng(index, tile, from) {
 }
 
 function claimMingGang(index, tile, from) {
-  if (isGold(tile)) return;
+  if (state.pendingYoujin || isGold(tile)) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 3);
   player.melds.push({ type: "ming-gang", tiles: [...used, tile], from });
@@ -1063,6 +1068,7 @@ function drawAfterGang(index) {
 }
 
 function claimChi(index, tile, from, option = getChiOptions(state.players[index], tile)[0]) {
+  if (state.pendingYoujin) return;
   const player = state.players[index];
   if (!option) return;
   const used = option.map(({ family, rank }) => removeNormalized(player.hand, family, rank));
@@ -1182,6 +1188,7 @@ function getYoujinDiscardOptions(index) {
 }
 
 function canWinByDiscard(index, tile) {
+  if (state.pendingYoujin) return false;
   if (countGold(state.players[index].hand) > 0) return false;
   const hand = [...state.players[index].hand, tile];
   return canCompleteHand(hand, state.players[index].melds);
@@ -1357,7 +1364,7 @@ function countMatching(hand, tile) {
 }
 
 function getSelfGangOptions(player) {
-  if (!player.drewThisTurn || state.pendingClaim || player.mustDiscardAfterClaim) return [];
+  if (!player.drewThisTurn || state.pendingClaim || state.pendingYoujin || player.mustDiscardAfterClaim) return [];
   const options = [];
   const drawnTile = player.hand.find((tile) => tile.instanceId === player.drawnTileId);
   const counts = new Map();
