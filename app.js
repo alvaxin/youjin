@@ -724,6 +724,7 @@ function drawForHuman() {
   if (!state.players[state.current].drewThisTurn) {
     const tile = drawForPlayer(state.current);
     if (tile) addLog(`${state.players[state.current].name} 摸牌。`);
+    if (resolveDeclaredYoujinOwnerDraw(state.current)) return;
     autoWinCheckAfterDraw(state.current);
   }
   render();
@@ -772,9 +773,8 @@ function advanceTurn(from) {
   }
 
   if (state.pendingYoujin && state.pendingYoujin.remaining <= 0) {
-    const winner = state.pendingYoujin.index;
-    state.current = winner;
-    finishRound(winner, state.pendingYoujin.winType || "youjin");
+    state.pendingYoujin.awaitingOwnerDraw = true;
+    state.current = state.pendingYoujin.index;
     return;
   }
 
@@ -830,6 +830,17 @@ function playYoujinDrawTurn(index) {
     if (state.phase !== "playing" || state.current !== index || !state.pendingYoujin || state.pendingYoujin.awaitingSelfHu) return;
     continueToNextTurn(index);
   }, 1200);
+}
+
+function resolveDeclaredYoujinOwnerDraw(index) {
+  const pending = state.pendingYoujin;
+  if (!pending?.awaitingOwnerDraw || pending.index !== index || state.phase !== "playing") return false;
+
+  pending.awaitingOwnerDraw = false;
+  const type = canWinByLimit(index, "double-youjin") ? "double-youjin" : (pending.winType || "youjin");
+  addLog(`${state.players[index].name} 游金阶段补摸后，按${type === "double-youjin" ? "双游保送" : "游金"}结算。`);
+  finishRound(index, type);
+  return true;
 }
 
 function resolveClaims(from, tile) {
@@ -997,9 +1008,10 @@ function passHumanClaim() {
       continueToNextTurn(state.current);
       return;
     }
-    if (state.phase === "playing" && player?.human && player.drewThisTurn && !player.passedSelfHu && canWinByLimit(state.current, "self")) {
+    if (state.phase === "playing" && player?.human && player.drewThisTurn && !player.passedSelfHu
+      && (canWinByLimit(state.current, "self") || canUndeclaredYoujinHu(state.current))) {
       player.passedSelfHu = true;
-      addLog(`${player.name} 放弃本次自摸。`);
+      addLog(`${player.name} 放弃本次${canUndeclaredYoujinHu(state.current) ? "游金" : "自摸"}。`);
       render();
       return;
     }
@@ -1157,6 +1169,8 @@ function runAiTurn() {
     if (tile) addLog(`${player.name} 摸牌。`);
   }
 
+  if (resolveDeclaredYoujinOwnerDraw(state.current)) return;
+
   if (player.goldCovered) {
     const drawnIndex = player.hand.findIndex((tile) => tile.instanceId === player.drawnTileId);
     discardTile(state.current, drawnIndex >= 0 ? drawnIndex : chooseDiscardIndex(player));
@@ -1182,6 +1196,10 @@ function runAiTurn() {
 function autoWinCheckAfterDraw(index) {
   const player = state.players[index];
   if (player.human || player.goldCovered) return false;
+  if (canUndeclaredYoujinHu(index)) {
+    finishRound(index, "youjin");
+    return true;
+  }
   if (canWinByLimit(index, "self")) {
     finishRound(index, "self");
     return true;
@@ -1210,8 +1228,13 @@ function tryHumanHu() {
     return;
   }
   const canHuDuringYoujin = state.pendingYoujin?.awaitingSelfHu === index;
-  if (state.players[index]?.human && (!state.pendingYoujin || canHuDuringYoujin) && !state.players[index].mustDiscardAfterClaim && !state.players[index].passedSelfHu && canWinByLimit(index, "self")) {
-    finishRound(index, "self");
+  const canUndeclaredYoujin = canUndeclaredYoujinHu(index);
+  if (state.players[index]?.human && (!state.pendingYoujin || canHuDuringYoujin) && !state.players[index].mustDiscardAfterClaim && !state.players[index].passedSelfHu) {
+    if (canUndeclaredYoujin) {
+      finishRound(index, "youjin");
+      return;
+    }
+    if (canWinByLimit(index, "self")) finishRound(index, "self");
   }
 }
 
@@ -1238,6 +1261,14 @@ function getYoujinDiscardOptions(index) {
       player.melds
     );
   });
+}
+
+function canUndeclaredYoujinHu(index) {
+  const player = state.players[index];
+  if (!player || player.goldCovered || state.pendingYoujin || player.declaredYoujin || !player.drewThisTurn || player.drawnTileId == null) return false;
+  if (countGold(player.hand) < 1 || countGold(player.hand) >= 3) return false;
+  const drawnIndex = player.hand.findIndex((tile) => tile.instanceId === player.drawnTileId);
+  return drawnIndex >= 0 && isYoujinReadyByHand(removeAt(player.hand, drawnIndex), player.melds);
 }
 
 function canWinByDiscard(index, tile) {
@@ -1617,8 +1648,9 @@ function render() {
   const canThreeGoldHu = state.phase === "playing" && state.pendingThreeGold === state.selfSeat && !myPlayer?.passedThreeGold
     && canWinByLimit(state.selfSeat, "three-gold");
   const canHuDuringYoujin = state.pendingYoujin?.awaitingSelfHu === state.selfSeat;
+  const canUndeclaredYoujin = canUndeclaredYoujinHu(state.selfSeat);
   const canSelfHu = state.phase === "playing" && myTurn && myPlayer?.drewThisTurn && !state.pendingThreeGold && (!state.pendingYoujin || canHuDuringYoujin) && !myPlayer.mustDiscardAfterClaim && !myPlayer.passedSelfHu
-    && canWinByLimit(state.current, "self");
+    && (canWinByLimit(state.current, "self") || canUndeclaredYoujin);
   const choosingYoujinDiscard = state.phase === "playing" && myTurn && myPlayer
     && state.pendingYoujin?.index === state.selfSeat && state.pendingYoujin.awaitingDiscard;
   const canDeclareYoujin = state.phase === "playing" && myTurn && myPlayer?.drewThisTurn
