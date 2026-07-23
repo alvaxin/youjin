@@ -429,7 +429,7 @@ function getTimedActionContext() {
 
   if (state.pendingYoujin) return null;
   const player = state.players[state.current];
-  if (!player?.human || !player.drewThisTurn) return null;
+  if (player?.goldCovered || !player?.human || !player.drewThisTurn) return null;
   return { key: `discard:${state.round}:${state.current}:${player.drawnTileId || "claim"}:${player.mustDiscardAfterClaim}:${player.passedSelfHu}`, index: state.current, type: "discard" };
 }
 
@@ -589,6 +589,7 @@ function startRound() {
     melds: [],
     discards: [],
     declaredYoujin: false,
+    goldCovered: false,
     passedThreeGold: false,
     passedSelfHu: false,
     mustDiscardAfterClaim: false,
@@ -755,6 +756,12 @@ function discardTile(index, tileIndex) {
     return;
   }
 
+  if (isGold(tile) && !player.goldCovered) {
+    player.goldCovered = true;
+    player.declaredYoujin = false;
+    addLog(`${player.name} 打出金牌，进入打金盖牌状态：后续仅自动摸牌并打出摸到的牌，结算水归零。`);
+  }
+
   if (resolveClaims(index, tile)) return;
   continueToNextTurn(index);
 }
@@ -781,6 +788,11 @@ function startCurrentTurn() {
 
   if (state.pendingYoujin && !state.pendingYoujin.awaitingDiscard && state.current !== state.pendingYoujin.index) {
     playYoujinDrawTurn(state.current);
+    return;
+  }
+
+  if (player.goldCovered) {
+    queueAiTurn();
     return;
   }
 
@@ -868,6 +880,7 @@ function prepareHumanClaim(from, tile, order) {
 function getHumanClaimTypes(index, from, tile) {
   if (state.pendingYoujin) return [];
   const player = state.players[index];
+  if (player.goldCovered) return [];
   const types = [];
   if (canWinByDiscard(index, tile)) types.push("hu");
   if (!isGold(tile) && countMatching(player.hand, tile) >= 3) types.push("gang");
@@ -890,7 +903,7 @@ function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4
   if (state.pendingYoujin) return false;
   for (const index of order) {
     const player = state.players[index];
-    if (player.human) continue;
+    if (player.human || player.goldCovered) continue;
     if (!isGold(tile) && countMatching(player.hand, tile) >= 3) {
       claimMingGang(index, tile, from);
       render();
@@ -1021,7 +1034,7 @@ function takeClaimedDiscard(from, tile) {
 }
 
 function claimPeng(index, tile, from) {
-  if (state.pendingYoujin || isGold(tile)) return;
+  if (state.pendingYoujin || isGold(tile) || state.players[index].goldCovered) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 2);
   takeClaimedDiscard(from, tile);
@@ -1036,7 +1049,7 @@ function claimPeng(index, tile, from) {
 }
 
 function claimMingGang(index, tile, from) {
-  if (state.pendingYoujin || isGold(tile)) return;
+  if (state.pendingYoujin || isGold(tile) || state.players[index].goldCovered) return;
   const player = state.players[index];
   const used = removeMatching(player.hand, tile, 3);
   takeClaimedDiscard(from, tile);
@@ -1052,7 +1065,7 @@ function claimMingGang(index, tile, from) {
 
 function claimSelfGang(index) {
   const player = state.players[index];
-  if (state.pendingThreeGold != null || state.pendingYoujin) return;
+  if (state.pendingThreeGold != null || state.pendingYoujin || player.goldCovered) return;
   const option = getSelfGangOptions(player)[0];
   if (!option) return;
 
@@ -1099,7 +1112,7 @@ function drawAfterGang(index) {
 }
 
 function claimChi(index, tile, from, option = getChiOptions(state.players[index], tile)[0]) {
-  if (state.pendingYoujin) return;
+  if (state.pendingYoujin || isGold(tile) || state.players[index].goldCovered) return;
   const player = state.players[index];
   if (!option) return;
   const used = option.map(({ family, rank }) => removeNormalized(player.hand, family, rank));
@@ -1134,7 +1147,7 @@ function ensureAiProgress() {
 function runAiTurn() {
   if (state.phase !== "playing") return;
   const player = state.players[state.current];
-  if (player.human) {
+  if (player.human && !player.goldCovered) {
     render();
     return;
   }
@@ -1142,6 +1155,12 @@ function runAiTurn() {
   if (!player.drewThisTurn) {
     const tile = drawForPlayer(state.current);
     if (tile) addLog(`${player.name} 摸牌。`);
+  }
+
+  if (player.goldCovered) {
+    const drawnIndex = player.hand.findIndex((tile) => tile.instanceId === player.drawnTileId);
+    discardTile(state.current, drawnIndex >= 0 ? drawnIndex : chooseDiscardIndex(player));
+    return;
   }
 
   if (autoWinCheckAfterDraw(state.current)) return;
@@ -1162,7 +1181,7 @@ function runAiTurn() {
 
 function autoWinCheckAfterDraw(index) {
   const player = state.players[index];
-  if (player.human) return false;
+  if (player.human || player.goldCovered) return false;
   if (canWinByLimit(index, "self")) {
     finishRound(index, "self");
     return true;
@@ -1210,7 +1229,7 @@ function declareYoujin(index) {
 function getYoujinDiscardOptions(index) {
   const player = state.players[index];
   const goldCount = countGold(player?.hand || []);
-  if (!player || goldCount < 1) return [];
+  if (!player || player.goldCovered || goldCount < 1) return [];
   return player.hand.filter((tile) => {
     if (isGold(tile) && goldCount < 2) return false;
     if (!isGold(tile) && goldCount >= 3) return false;
@@ -1222,16 +1241,18 @@ function getYoujinDiscardOptions(index) {
 }
 
 function canWinByDiscard(index, tile) {
-  if (state.pendingYoujin) return false;
-  if (countGold(state.players[index].hand) > 0) return false;
-  const hand = [...state.players[index].hand, tile];
-  return canCompleteHand(hand, state.players[index].melds);
+  const player = state.players[index];
+  if (state.pendingYoujin || isGold(tile) || player.goldCovered) return false;
+  if (countGold(player.hand) > 0) return false;
+  return canCompleteHand([...player.hand, tile], player.melds);
 }
 
 function canWinByLimit(index, type) {
-  const goldCount = countGold(state.players[index].hand);
+  const player = state.players[index];
+  if (!player || player.goldCovered) return false;
+  const goldCount = countGold(player.hand);
   if (type === "three-gold") return state.startGoldCounts[index] >= 3;
-  if (type === "self") return goldCount < 2 && canCompleteHand(state.players[index].hand, state.players[index].melds);
+  if (type === "self") return goldCount < 2 && canCompleteHand(player.hand, player.melds);
   if (type === "youjin") return goldCount < 3 && isYoujinReady(index);
   if (type === "double-youjin") return isDoubleYoujin(index);
   return false;
@@ -1356,7 +1377,7 @@ function canChi(player, tile) {
 
 function getChiOptions(player, tile) {
   const normalized = normalizeTile(tile);
-  if (!["W", "T", "B"].includes(normalized.family)) return [];
+  if (isGold(tile) || !["W", "T", "B"].includes(normalized.family)) return [];
   return [
     [normalized.rank - 2, normalized.rank - 1],
     [normalized.rank - 1, normalized.rank + 1],
@@ -1398,7 +1419,7 @@ function countMatching(hand, tile) {
 }
 
 function getSelfGangOptions(player) {
-  if (!player.drewThisTurn || state.pendingClaim || state.pendingYoujin || player.mustDiscardAfterClaim) return [];
+  if (player.goldCovered || !player.drewThisTurn || state.pendingClaim || state.pendingYoujin || player.mustDiscardAfterClaim) return [];
   const options = [];
   const drawnTile = player.hand.find((tile) => tile.instanceId === player.drawnTileId);
   const counts = new Map();
@@ -1532,6 +1553,7 @@ function settleScores(winner, type) {
 }
 
 function calcWater(player) {
+  if (player.goldCovered) return 0;
   let water = calcFlowerWater(player.flowers);
   for (const meld of player.melds) {
     if (meld.type === "ming-gang") water += 1;
@@ -1657,6 +1679,7 @@ function renderTable() {
   el.selfInfo.classList.toggle("active", state.current === state.selfSeat && state.phase === "playing");
   renderTiles(el.selfDiscards, mine?.discards.slice(-18) || [], true);
   renderTiles(el.selfMelds, mine ? [...mine.melds.flatMap((meld) => meld.tiles), ...mine.flowers] : [], true);
+  el.selfHand.classList.toggle("gold-covered-hand", Boolean(mine?.goldCovered));
   el.selfHand.replaceChildren();
   const handEntries = (mine?.hand || []).map((tile, index) => ({ tile, index }));
   const lockedYoujinTileIds = state.pendingYoujin?.index === state.selfSeat && state.pendingYoujin.awaitingDiscard
@@ -1669,12 +1692,12 @@ function renderTable() {
     ? [...handEntries.filter(({ tile }) => tile.instanceId !== drawnTile.tile.instanceId), drawnTile]
     : handEntries;
   orderedEntries.forEach(({ tile, index }) => {
-    const node = tileNode(tile);
+    const node = tileNode(tile, false, Boolean(mine?.goldCovered));
     if (drawnTile?.tile.instanceId === tile.instanceId) node.classList.add("drawn-tile");
     if (lockedYoujinTileIds) {
       node.classList.add(lockedYoujinTileIds.includes(tile.instanceId) ? "youjin-discard-target" : "youjin-discard-muted");
     }
-    if (state.phase === "playing" && state.current === state.selfSeat && mine.drewThisTurn && !state.pendingThreeGold && (!state.pendingYoujin || lockedYoujinTileIds)
+    if (!mine.goldCovered && state.phase === "playing" && state.current === state.selfSeat && mine.drewThisTurn && !state.pendingThreeGold && (!state.pendingYoujin || lockedYoujinTileIds)
       && (!lockedYoujinTileIds || lockedYoujinTileIds.includes(tile.instanceId))) {
       node.classList.add("clickable");
       node.addEventListener("click", () => requestAction("discard", { tileIndex: index }));
@@ -1688,8 +1711,8 @@ function renderTable() {
     const node = document.querySelector(positionMap[relative]);
     if (!player) { node.replaceChildren(); continue; }
     const card = document.createElement("div");
-    card.className = `opponent-card${state.current === index && state.phase === "playing" ? " active" : ""}`;
-    card.innerHTML = `<span class="avatar">${windName(index)}</span><span><strong>${player.name}</strong><small>${state.scores[index]} 分 · ${player.hand.length} 张</small></span>`;
+    card.className = `opponent-card${state.current === index && state.phase === "playing" ? " active" : ""}${player.goldCovered ? " gold-covered" : ""}`;
+    card.innerHTML = `<span class="avatar">${windName(index)}</span><span><strong>${player.name}</strong><small>${state.scores[index]} 分 · ${player.hand.length} 张</small>${player.goldCovered ? '<em class="gold-cover-status">打金盖牌</em>' : ""}</span>`;
     const melds = document.createElement("div"); melds.className = "mini-melds"; renderTiles(melds, [...player.melds.flatMap((meld) => meld.tiles), ...player.flowers], true); card.appendChild(melds);
     const discards = document.createElement("div");
     discards.className = "seat-discards opponent-discards";
@@ -1701,14 +1724,14 @@ function renderTable() {
   }
 }
 function renderTiles(container, tiles, small = false) { container.replaceChildren(...tiles.map((tile) => tileNode(tile, small))); }
-function tileNode(tile, small = false) {
+function tileNode(tile, small = false, covered = false) {
   const node = document.createElement("button");
   node.type = "button";
-  node.className = `tile art${small ? " small" : ""}${isGold(tile) ? " gold" : ""}${isFlower(tile) ? " flower" : ""}`;
+  node.className = `tile ${covered ? "back gold-covered-back" : "art"}${small ? " small" : ""}${!covered && isGold(tile) ? " gold" : ""}${!covered && isFlower(tile) ? " flower" : ""}`;
   node.dataset.family = tile.family;
   node.dataset.rank = tile.rank || "";
   node.dataset.label = tile.label;
-  node.style.backgroundImage = `url("assets/tiles/${tileAssetName(tile)}.png")`;
+  if (!covered) node.style.backgroundImage = `url("assets/tiles/${tileAssetName(tile)}.png")`;
   return node;
 }
 
