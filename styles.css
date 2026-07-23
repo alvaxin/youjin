@@ -13,6 +13,7 @@
 .self-hand.gold-covered-hand { position:relative; }
 .self-hand.gold-covered-hand::after { content:"打金盖牌"; position:absolute; z-index:2; left:50%; top:50%; transform:translate(-50%,-50%); padding:4px 10px; border:1px solid #f2b932; border-radius:4px; background:#063d36e8; color:#ffe08a; font-size:14px; font-weight:800; letter-spacing:0; pointer-events:none; white-space:nowrap; }
 .tile.gold-covered-back { filter:brightness(.82); }
+.tile.gold-covered-back::before { content:"" !important; }
 .gold-cover-status { display:block; margin-top:2px; color:#ffe08a; font-size:11px; font-style:normal; font-weight:800; }
 .self-hand .tile.youjin-discard-target { transform:translateY(-9px); border-color:#f5c744; box-shadow:0 0 0 2px #f5c744,0 6px 10px #0008; animation:youjin-target-pulse .8s ease-in-out infinite alternate; }
 .self-hand .tile.youjin-discard-muted { filter:brightness(.48) saturate(.4); opacity:.62; }
