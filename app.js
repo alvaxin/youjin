@@ -843,8 +843,14 @@ function resolveDeclaredYoujinOwnerDraw(index) {
   if (!pending?.awaitingOwnerDraw || pending.index !== index || state.phase !== "playing") return false;
 
   pending.awaitingOwnerDraw = false;
-  const type = canWinByLimit(index, "double-youjin") ? "double-youjin" : (pending.winType || "youjin");
-  addLog(`${state.players[index].name} 游金阶段补摸后，按${type === "double-youjin" ? "双游保送" : "游金"}结算。`);
+  const stillDoubleYoujin = canWinByLimit(index, "double-youjin");
+  const type = pending.winType === "double-youjin" && stillDoubleYoujin
+    ? "triple-youjin"
+    : stillDoubleYoujin
+      ? "double-youjin"
+      : (pending.winType || "youjin");
+  const resultName = ({ youjin: "游金", "double-youjin": "双游保送", "triple-youjin": "三游" }[type]) || "游金";
+  addLog(`${state.players[index].name} 游金阶段补摸后，按${resultName}结算。`);
   finishRound(index, type);
   return true;
 }
@@ -1529,6 +1535,7 @@ function finishRound(index, type, tile = null, from = null) {
     self: "自摸胡牌",
     youjin: "游金",
     "double-youjin": "双游",
+    "triple-youjin": "三游",
     "three-gold": "三金倒"
   }[type];
   addLog(`${state.players[index].name} ${typeText}，番 ${score.fan}，水 ${score.waters[index]}。`);
@@ -1567,8 +1574,8 @@ function finishDraw() {
 
 function settleScores(winner, type) {
   const before = [...state.scores];
-  const waters = state.players.map((player) => calcWater(player, type === "double-youjin"));
-  const fan = ({ discard: 2, self: 4, youjin: 10, "three-gold": 10, "double-youjin": 20 }[type]) || 2;
+  const waters = state.players.map((player) => calcWater(player, type === "double-youjin" || type === "triple-youjin"));
+  const fan = ({ discard: 2, self: 4, youjin: 10, "three-gold": 10, "double-youjin": 20, "triple-youjin": 80 }[type]) || 2;
   const total = fan + waters[winner];
   state.scores[winner] += total * 3;
   for (let i = 0; i < 4; i += 1) {
