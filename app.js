@@ -589,6 +589,7 @@ function startRound() {
     melds: [],
     discards: [],
     declaredYoujin: false,
+    discardedYoujinGolds: 0,
     goldCovered: false,
     passedThreeGold: false,
     passedSelfHu: false,
@@ -751,6 +752,7 @@ function discardTile(index, tileIndex) {
   if (youjinDeclaration) {
     state.pendingYoujin.awaitingDiscard = false;
     state.pendingYoujin.winType = isGold(tile) ? "double-youjin" : "youjin";
+    if (state.pendingYoujin.winType === "double-youjin") player.discardedYoujinGolds += 1;
     delete state.pendingYoujin.discardTileIds;
     addLog(`${player.name} 打出${state.pendingYoujin.winType === "double-youjin" ? "金牌，进入双游" : "游金听牌"}，其他三家各剩一次摸牌机会。`);
     continueToNextTurn(index);
@@ -1561,7 +1563,7 @@ function finishDraw() {
 
 function settleScores(winner, type) {
   const before = [...state.scores];
-  const waters = state.players.map((player) => calcWater(player));
+  const waters = state.players.map((player) => calcWater(player, type === "double-youjin"));
   const fan = ({ discard: 2, self: 4, youjin: 10, "three-gold": 10, "double-youjin": 20 }[type]) || 2;
   const total = fan + waters[winner];
   state.scores[winner] += total * 3;
@@ -1583,7 +1585,7 @@ function settleScores(winner, type) {
   return { fan, waters, total, before, after: [...state.scores], changes };
 }
 
-function calcWater(player) {
+function calcWater(player, includeDiscardedYoujinGold = false) {
   if (player.goldCovered) return 0;
   let water = calcFlowerWater(player.flowers);
   for (const meld of player.melds) {
@@ -1592,6 +1594,7 @@ function calcWater(player) {
     if (meld.type === "an-gang") water += 2;
   }
   water += countGold(player.hand);
+  if (includeDiscardedYoujinGold) water += player.discardedYoujinGolds || 0;
   return water;
 }
 
