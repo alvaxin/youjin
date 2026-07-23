@@ -1891,7 +1891,8 @@ function renderScoreDetails() {
     change.textContent = `本局 ${formatDelta(delta)}`;
 
     const water = document.createElement("span");
-    water.textContent = player ? `水 ${calcWater(player)}` : "水 0";
+    const settledWater = state.lastSettlement?.waters?.[index] ?? 0;
+    water.textContent = `水 ${settledWater}`;
 
     row.append(name, score, change, water);
     return row;
