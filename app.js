@@ -64,6 +64,7 @@ const state = {
   lastSettlement: null,
   audioEvents: [],
   audioSequence: 0,
+  aiNames: [],
   log: [],
   selfSeat: 0
 };
@@ -205,6 +206,7 @@ async function createRoom() {
   if (!net.account) return;
   try {
     net.room = await api("/api/rooms", { token: net.account.token });
+    state.aiNames = shuffle(["珍珍", "爱爱", "莲莲"]);
     connectRoom();
     updateRoomText();
   } catch (error) { alert(error.message); }
@@ -581,10 +583,10 @@ function startRound() {
   state.audioEvents = [];
 
   const members = net.room?.members || [{ name: net.account?.name || "玩家 1", seat: 0 }];
-  const aiNames = shuffle(["珍珍", "爱爱", "莲莲"]);
+  if (!state.aiNames.length) state.aiNames = shuffle(["珍珍", "爱爱", "莲莲"]);
   let nextAiName = 0;
   state.players = Array.from({ length: 4 }, (_, i) => ({
-    name: members.find((member) => member.seat === i)?.name || aiNames[nextAiName++],
+    name: members.find((member) => member.seat === i)?.name || state.aiNames[nextAiName++],
     human: members.some((member) => member.seat === i),
     hand: [],
     flowers: [],
