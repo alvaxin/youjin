@@ -581,8 +581,10 @@ function startRound() {
   state.audioEvents = [];
 
   const members = net.room?.members || [{ name: net.account?.name || "玩家 1", seat: 0 }];
+  const aiNames = shuffle(["珍珍", "爱爱", "莲莲"]);
+  let nextAiName = 0;
   state.players = Array.from({ length: 4 }, (_, i) => ({
-    name: members.find((member) => member.seat === i)?.name || `AI ${i + 1}`,
+    name: members.find((member) => member.seat === i)?.name || aiNames[nextAiName++],
     human: members.some((member) => member.seat === i),
     hand: [],
     flowers: [],
