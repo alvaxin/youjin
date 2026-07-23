@@ -857,59 +857,37 @@ function resolveDeclaredYoujinOwnerDraw(index) {
 
 function resolveClaims(from, tile) {
   if (state.pendingYoujin) return false;
+  const claims = buildClaimQueue(from, tile);
+  if (!claims.length) return false;
+  state.pendingClaim = { from, tile, claims, position: 0 };
+  return processPendingClaim();
+}
+
+function buildClaimQueue(from, tile) {
   const order = [1, 2, 3].map((n) => (from + n) % 4);
+  const huClaims = [];
+  const meldClaims = [];
+  const chiClaims = [];
+
   for (const index of order) {
-    if (canWinByDiscard(index, tile)) {
-      if (state.players[index].human) {
-        state.pendingClaim = { from, tile, claims: [{ index, types: getHumanClaimTypes(index, from, tile) }], position: 0 };
-        activatePendingClaim();
-        render();
-      } else {
-        finishRound(index, "discard", tile, from);
-      }
-      return true;
+    const player = state.players[index];
+    if (!player || player.goldCovered) continue;
+
+    if (canWinByDiscard(index, tile)) huClaims.push({ index, types: ["hu"] });
+
+    if (!isGold(tile)) {
+      const types = [];
+      if (countMatching(player.hand, tile) >= 3) types.push("gang");
+      if (countMatching(player.hand, tile) >= 2) types.push("peng");
+      if (types.length) meldClaims.push({ index, types });
+    }
+
+    if (index === (from + 1) % 4 && getChiOptions(player, tile).length) {
+      chiClaims.push({ index, types: ["chi"] });
     }
   }
 
-  if (prepareHumanClaim(from, tile, order)) {
-    render();
-    return true;
-  }
-
-  return resolveAiClaims(from, tile, order);
-}
-
-function prepareHumanClaim(from, tile, order) {
-  if (state.pendingYoujin) return false;
-  const humanClaims = [];
-  for (const index of order) {
-    const player = state.players[index];
-    if (!player.human) continue;
-
-    const types = getHumanClaimTypes(index, from, tile);
-    if (types.length) humanClaims.push({ index, types });
-  }
-
-  humanClaims.sort((a, b) => {
-    return claimPriority(a.types) - claimPriority(b.types);
-  });
-
-  if (!humanClaims.length) return false;
-  state.pendingClaim = { from, tile, claims: humanClaims, position: 0 };
-  activatePendingClaim();
-  return true;
-}
-
-function getHumanClaimTypes(index, from, tile) {
-  if (state.pendingYoujin) return [];
-  const player = state.players[index];
-  if (player.goldCovered) return [];
-  const types = [];
-  if (canWinByDiscard(index, tile)) types.push("hu");
-  if (!isGold(tile) && countMatching(player.hand, tile) >= 3) types.push("gang");
-  if (!isGold(tile) && countMatching(player.hand, tile) >= 2) types.push("peng");
-  if (index === (from + 1) % 4 && getChiOptions(player, tile).length) types.push("chi");
-  return types;
+  return [...huClaims, ...meldClaims, ...chiClaims];
 }
 
 function activatePendingClaim() {
@@ -922,40 +900,37 @@ function activatePendingClaim() {
   addLog(`${state.players[claim.index].name} 可选择 ${claim.types.map(claimTypeName).join(" / ")} ${tileName(state.pendingClaim.tile)}。`);
 }
 
-function resolveAiClaims(from, tile, order = [1, 2, 3].map((n) => (from + n) % 4)) {
-  if (state.pendingYoujin) return false;
-  for (const index of order) {
-    const player = state.players[index];
-    if (player.human || player.goldCovered) continue;
-    if (!isGold(tile) && countMatching(player.hand, tile) >= 3) {
-      claimMingGang(index, tile, from);
-      render();
-      queueAiTurn();
-      return true;
+function processPendingClaim() {
+  const pending = state.pendingClaim;
+  const claim = getActiveClaim();
+  if (!pending || !claim) {
+    if (pending) {
+      state.pendingClaim = null;
+      continueToNextTurn(pending.from);
     }
-    if (!isGold(tile) && countMatching(player.hand, tile) >= 2) {
-      removeMatching(player.hand, tile, 2);
-      takeClaimedDiscard(from, tile);
-      player.melds.push({ type: "peng", tiles: [tile, tile, tile], from });
-      emitAudioCue("peng");
-      addLog(`${player.name} 碰 ${tileName(tile)}。`);
-      state.current = index;
-      player.drewThisTurn = true;
-      player.mustDiscardAfterClaim = true;
-      render();
-      queueAiTurn();
-      return true;
-    }
-  }
-
-  const next = (from + 1) % 4;
-  if (!state.players[next].human && canChi(state.players[next], tile)) {
-    claimChi(next, tile, from);
-    render();
-    queueAiTurn();
     return true;
   }
-  return false;
+
+  const player = state.players[claim.index];
+  if (player.human) {
+    activatePendingClaim();
+    render();
+    return true;
+  }
+
+  state.pendingClaim = null;
+  if (claim.types.includes("hu")) {
+    finishRound(claim.index, "discard", pending.tile, pending.from);
+    return true;
+  }
+  if (claim.types.includes("gang")) claimMingGang(claim.index, pending.tile, pending.from);
+  else if (claim.types.includes("peng")) claimPeng(claim.index, pending.tile, pending.from);
+  else if (claim.types.includes("chi")) claimChi(claim.index, pending.tile, pending.from);
+  else return false;
+
+  render();
+  queueAiTurn();
+  return true;
 }
 
 function claimForHuman(type, chiOptionIndex) {
@@ -1033,14 +1008,11 @@ function passHumanClaim() {
 
   claim.position += 1;
   if (claim.position < claim.claims.length) {
-    activatePendingClaim();
-    render();
+    processPendingClaim();
     return;
   }
 
   state.pendingClaim = null;
-  const order = [1, 2, 3].map((n) => (claim.from + n) % 4);
-  if (resolveAiClaims(claim.from, claim.tile, order)) return;
   continueToNextTurn(claim.from);
 }
 
